@@ -1,1 +1,2 @@
 # CPE-316-P2-FunctionGenerator
+This project used the keypad to allow user input to generate a set range of frequencies and waveforms via MCP4921 DAC output. The 1-5 keys on the keypad change the frequency of the output corresponding to 100-500Hz, the 6-9 keys change the type of waveform between sine, triangle, sawtooth, and square respectively, and the *,0,# keys change the duty cycle (only in use for the square waveform).
