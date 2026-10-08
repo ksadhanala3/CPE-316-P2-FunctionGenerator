@@ -1,238 +1,246 @@
 /* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2024 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
-/* USER CODE END Header */
-/* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "dac.h"
-#include "key.h"
+#include "DAC.h"
+#include "Keypad.h"
 #include <math.h>
-/* Private function prototypes -----------------------------------------------*/
+#include <stdio.h>
+#define sine 6
+#define triangle 7
+#define sawtooth 8
+#define square 9
+#define TABLE_SIZE 240
+//Timer at 32MHz
+#define Hz100 (32000000 / (100 * TABLE_SIZE)) - 1 //create ARR Value for non-square waves
+#define Hz200 (32000000 / (200 * TABLE_SIZE)) - 1
+#define Hz300 (32000000 / (300 * TABLE_SIZE)) - 1
+#define Hz400 (32000000 / (400 * TABLE_SIZE)) - 1
+#define Hz500 (32000000 / (500 * TABLE_SIZE)) - 1
+//ARR Values for square waves since no table is used
+#define SqHz100 (32000000 / 100) - 1
+#define SqHz200 (32000000 / 200) - 1
+#define SqHz300 (32000000 / 300) - 1
+#define SqHz400 (32000000 / 400) - 1
+#define SqHz500 (32000000 / 500) - 1
+uint16_t sine_table[TABLE_SIZE]; //Initialize look up tables
+uint16_t sawtooth_table[TABLE_SIZE];
+uint16_t triangle_table[TABLE_SIZE];
+volatile int wave_index = -1; //global index variable
+volatile int hold_duty_cycle = 50; //Duty cycle global variable
+volatile int hold_waveform = square; //Used to track waveform
+volatile int hold_freq = 1; //Used to track and hold frequency
+	void set_ARR(int ARR_value){ //Stop timer to set ARR, avoid timing issues
+		TIM2->CR1 &= ~TIM_CR1_CEN;
+		TIM2->ARR = ARR_value;
+		TIM2->CNT = 0;
+		TIM2->EGR = TIM_EGR_UG;
+		TIM2->CR1 |= TIM_CR1_CEN;
+	}
+	void set_CCR(void){ //Stop timer to set CCR, avoid timing issues
+			TIM2->CR1 &= ~TIM_CR1_CEN;
+			TIM2->CCR1 = (uint32_t)((((TIM2->ARR + 1) * hold_duty_cycle) / 100) - 1);
+			TIM2->CNT = 0;
+			TIM2->EGR = TIM_EGR_UG;
+			TIM2->CR1 |= TIM_CR1_CEN;
+		}
+	void set_freq(int freq){ //Set frequency depending on hold freq and hold waveform
+		int ARR = 0;
+		if (hold_waveform == square){ //Check to pull square wave or non-square wave frequencies
+			switch (freq){
+			case 1: ARR = SqHz100;
+				break;
+			case 2: ARR = SqHz200;
+				break;
+			case 3: ARR = SqHz300;
+				break;
+			case 4: ARR = SqHz400;
+				break;
+			case 5: ARR = SqHz500;
+				break;
+			}
+		} else {
+			switch(freq){
+			case 1: ARR = Hz100;
+				break;
+			case 2: ARR = Hz200;
+				break;
+			case 3: ARR = Hz300;
+				break;
+			case 4: ARR = Hz400;
+				break;
+			case 5: ARR = Hz500;
+				break;
+			}
+		}
+		set_ARR(ARR); //Set ARR to designated value
+	}
+	void square_wave(){ //Hold wave form until key is pressed
+		wave_index = -1;
+		HAL_Delay(200); //Ensure that duty cycle is not accidently increased by 2
+		while(check_press(0) == -1);
+	}
+	void sine_wave(){//Hold wave form until key is pressed
+		wave_index = 0;
+		TIM2->CCR1 = 0;
+		while(check_press(0) == -1);
+	}
+	void sawtooth_wave(){//Hold wave form until key is pressed
+		wave_index = 0;
+		TIM2->CCR1 = 0;
+		while(check_press(0) == -1){
+		}
+	}
+	void triangle_wave(){//Hold wave form until key is pressed
+		wave_index = 0;
+		TIM2->CCR1 = 0;
+		while(check_press(0) == -1){
+		}
+	}
+	void generate_sine_table(uint16_t table[TABLE_SIZE]){
+		for (int i = 0; i < TABLE_SIZE; i++){
+			float theta = ((2.0 * M_PI * i) / TABLE_SIZE);
+			float voltage = 1.5 + (1.5 * sin(theta));
+			table[i] = (uint16_t)(1000 * voltage);
+		}
+	}
+	void generate_sawtooth_table(uint16_t table[TABLE_SIZE]){
+		for (int i = 0; i < TABLE_SIZE; i++){
+			table[i] = (uint16_t)((3000 * i / TABLE_SIZE));
+		}
+	}
+	void generate_triangle_table(uint16_t table[TABLE_SIZE]){
+		for (int i = 0; i < TABLE_SIZE; i++){
+			float edge = (float)i / TABLE_SIZE;
+			float voltage;
+			if(edge < 0.5){
+				voltage = edge * 2.0;
+			} else {
+				voltage = 2.0 - (edge * 2.0);
+			}
+			table[i] = (uint16_t)(3000 * voltage);
+		}
+	}
+	void key_logic(int pressed_key){ //Check which key is pressed and change the desired setting while retaining the rest
+		if(pressed_key == -1){ //No key pressed
+			return;
+		}
+		else if(pressed_key == 1) {
+			hold_freq = 1;
+		}
+		else if(pressed_key == 2) {
+			hold_freq = 2;
+		}
+		else if(pressed_key == 3) {
+			hold_freq = 3;
+		}
+		else if(pressed_key == 4) {
+			hold_freq = 4;
+		}
+		else if(pressed_key == 5) {
+			hold_freq = 5;
+		}
+		else if(pressed_key == sine) {
+			hold_waveform = sine;
+		}
+		else if(pressed_key == triangle) {
+			hold_waveform = triangle;
+		}
+		else if(pressed_key == sawtooth) {
+			hold_waveform = sawtooth;
+		}
+		else if(pressed_key == square) {
+			hold_waveform = square;
+		}
+		else if(pressed_key == 10) { //10= *, decrease duty cycle by 10%
+			if(hold_duty_cycle > 15) {
+			hold_duty_cycle -= 10;
+			}
+		}
+		else if(pressed_key == 11) {//11=#, increase duty cycle by 10%
+			if(hold_duty_cycle < 85) {
+			hold_duty_cycle += 10;
+			}
+		}
+		else if(pressed_key == 0) { //Set duty cycle to 50%
+			hold_duty_cycle = 50;
+		}
+		set_freq(hold_freq); //Set freq, if freq was not changed, this will not affect anything
+		set_CCR(); //Set CCR for square waves
+		switch(hold_waveform) {
+			case square:
+				square_wave();
+				break;
+			case triangle:
+				triangle_wave();
+				break;
+			case sawtooth:
+				sawtooth_wave();
+				break;
+			case sine:
+				sine_wave();
+				break;
+			default:
+				square_wave();
+				break;
+		}
+		return;
+	}
 void SystemClock_Config(void);
-void tim2_init(void);
-void wave_data(void);
-
-int32_t status = SQR;
-uint16_t sin_data[STEPS];
-uint16_t tri_data[STEPS];
-uint16_t saw_data[STEPS];
-uint16_t index = 0;
-uint8_t duty = 50;
-uint16_t freq = 100;
-uint32_t ccr = STEPS;
-
 int main(void)
 {
-  HAL_Init();
-  SystemClock_Config();
-  wave_data();
-  key_init();
-  dac_init();
-  tim2_init();
+ HAL_Init();
+ SystemClock_Config();
+ RCC->AHB2ENR |= (RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN | RCC_AHB2ENR_GPIOCEN);
+ //Generate tables for non-swuare waves
+ generate_sine_table(sine_table);
+  generate_sawtooth_table(sawtooth_table);
+  generate_triangle_table(triangle_table);
   __enable_irq();
-
-  //Alter calculation values and data values used
-  while (1)
-  {
-	  int32_t press = pollValue();
-	  switch(press)
-	  {
-	  case 1:
-		  freq = 1;
-		  break;
-	  case 2:
-		  freq = 2;
-		  break;
-	  case 3:
-		  freq = 3;
-		  break;
-	  case 4:
-		  freq = 4;
-		  break;
-	  case 5:
-		  freq = 5;
-		  break;
-	  case SINE:
-		  status = SINE;
-		  break;
-	  case TRI:
-		  status = TRI;
-		  break;
-	  case SAW:
-		  status = SAW;
-		  break;
-	  case SQR:
-		  status = SQR;
-		  break;
-	  case 0:
-		  duty = 50;
-		  break;
-	  case STAR:
-		  if(duty > 10) {
-			  duty -= 10;
-		  } break;
-	  case HASH:
-		  if(duty < 90) {
-			  duty += 10;
-		  } break;
-	  }
-  }
+  NVIC->ISER[0] = (1 << (TIM2_IRQn & 0x1F));
+    RCC->APB1ENR1 |= (RCC_APB1ENR1_TIM2EN);	// turn on TIM2
+    TIM2->DIER |= (TIM_DIER_UIE | TIM_DIER_CC1IE);	// enable interrupts on channel 1
+    TIM2->SR &= ~(TIM_SR_CC1IF |TIM_SR_UIF);	//clear interrupt flag
+ DAC_init();
+ keypad_init();
+ set_freq(1);		//set count reload value
+ set_CCR();
+ TIM2->CR1 |= TIM_CR1_CEN;	//start timer
+ while (1)
+ {
+	int pressed_key = check_press(0);
+	key_logic(pressed_key);
+ }
 }
-
-//Handle constantly writing out values
 void TIM2_IRQHandler(void) {
-	TIM2->SR &= ~(TIM_SR_UIF | TIM_SR_CC1IF);
-	//SPI1->DR = 0x3FFF;
-
-	switch(status)
-	{
-	case SINE:
-		dac_write(dac_volt_conv(sin_data[index]));
-		index = (index+freq)%STEPS;
-		break;
-	case TRI:
-		dac_write(dac_volt_conv(tri_data[index]));
-		index = (index+freq)%STEPS;
-		break;
-	case SAW:
-		dac_write(dac_volt_conv(saw_data[index]));
-		index = (index+freq)%STEPS;
-		break;
-	case SQR:
-		if(index<((duty*STEPS)/100)) {
-			dac_write(dac_volt_conv(V_MAX));
+	// Handle ARR first to skip over CCR when not SQ wave
+	if(TIM2->SR & TIM_SR_UIF) {
+		if (wave_index >= 0){
+			switch(hold_waveform) { //Pick lookup table for selected wave
+				case triangle:
+					DAC_write(DAC_volt_conv(triangle_table[wave_index]));
+					break;
+				case sawtooth:
+					DAC_write(DAC_volt_conv(sawtooth_table[wave_index]));
+					break;
+				case sine:
+					DAC_write(DAC_volt_conv(sine_table[wave_index]));
+					break;
+				default:
+					DAC_write(DAC_volt_conv(sine_table[wave_index]));
+					break;
+			}
+			if(++wave_index >= TABLE_SIZE) { //Check to make sure next index is not out of range of lookup tables
+				wave_index = 0;
+			}
+		} else { // For SQ wave
+			DAC_write(DAC_volt_conv(3000)); //Set High for square waves
 		}
-		else {
-			dac_write(dac_volt_conv(0));
+		TIM2->SR &= ~(TIM_SR_UIF);
+	}
+// This indicates it was CCR that tripped not ARR, only for SQ wave
+else if(TIM2->SR & TIM_SR_CC1IF) {
+		if(wave_index < 0) { //Check to make sure we are in a square wave
+			DAC_write(DAC_volt_conv(0)); //set low for square waves
 		}
-		index += freq;
-
-		if(index > STEPS) {
-			index = 0;
-		}
-		break;
-	}
-	TIM2->CCR1 += STEPS;
-}
-
-//Initialize Timer 2
-void tim2_init(void){
-	RCC->APB1ENR1 |= RCC_APB1ENR1_TIM2EN;
-	TIM2->CR1 |= TIM_CR1_ARPE;
-	TIM2->CCR1 = STEPS;
-	TIM2->DIER |= TIM_DIER_UIE;
-	TIM2->DIER |= TIM_DIER_CC1IE;
-	TIM2->ARR = 0xFFFFFFFF;
-	NVIC->ISER[0] = (1 << (TIM2_IRQn & 0x1F));
-	TIM2->CR1 |= TIM_CR1_CEN;
-}
-
-//Fill wave data array
-void wave_data(void){
-	for(int i = 0; i < STEPS; i++) {
-		sin_data[i] = (uint16_t)((V_MAX/2)*sin(2*M_PI*i/STEPS)+(V_MAX/2));
-	}
-	for(int i = 0; i < STEPS/2; i++) {
-		tri_data[i] = (uint16_t)(V_MAX/(STEPS/2)*i);
-	}
-	for(int i = STEPS/2; i < STEPS; i++) {
-		tri_data[i] = (uint16_t)(V_MAX - (V_MAX/(STEPS/2))*(i-(STEPS/2)));
-	}
-	for(int i = 0; i < STEPS; i++) {
-		saw_data[i] = (uint16_t)(V_MAX*i/STEPS);
+		TIM2->SR &= ~(TIM_SR_CC1IF);
 	}
 }
-
-/**
-  * @brief System Clock Configuration
-  * @retval None
-  */
-void SystemClock_Config(void)
-{
-  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-
-  /** Configure the main internal regulator output voltage
-  */
-  if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSI;
-  RCC_OscInitStruct.MSIState = RCC_MSI_ON;
-  RCC_OscInitStruct.MSICalibrationValue = 0;
-  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-}
-
-/* USER CODE BEGIN 4 */
-
-/* USER CODE END 4 */
-
-/**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
-void Error_Handler(void)
-{
-  /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
-  /* USER CODE END Error_Handler_Debug */
-}
-
-#ifdef  USE_FULL_ASSERT
-/**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
-void assert_failed(uint8_t *file, uint32_t line)
-{
-  /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
-  /* USER CODE END 6 */
-}
-#endif /* USE_FULL_ASSERT */
