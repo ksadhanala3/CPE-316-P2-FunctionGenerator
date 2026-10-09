@@ -4,10 +4,12 @@
 #include "Keypad.h"
 #include <math.h>
 #include <stdio.h>
+
 #define sine 6
 #define triangle 7
 #define sawtooth 8
 #define square 9
+
 #define TABLE_SIZE 240
 //Timer at 32MHz
 #define Hz100 (32000000 / (100 * TABLE_SIZE)) - 1 //create ARR Value for non-square waves
@@ -15,19 +17,24 @@
 #define Hz300 (32000000 / (300 * TABLE_SIZE)) - 1
 #define Hz400 (32000000 / (400 * TABLE_SIZE)) - 1
 #define Hz500 (32000000 / (500 * TABLE_SIZE)) - 1
+
 //ARR Values for square waves since no table is used
 #define SqHz100 (32000000 / 100) - 1
 #define SqHz200 (32000000 / 200) - 1
 #define SqHz300 (32000000 / 300) - 1
 #define SqHz400 (32000000 / 400) - 1
 #define SqHz500 (32000000 / 500) - 1
+
+
 uint16_t sine_table[TABLE_SIZE]; //Initialize look up tables
 uint16_t sawtooth_table[TABLE_SIZE];
 uint16_t triangle_table[TABLE_SIZE];
+
 volatile int wave_index = -1; //global index variable
 volatile int hold_duty_cycle = 50; //Duty cycle global variable
 volatile int hold_waveform = square; //Used to track waveform
 volatile int hold_freq = 1; //Used to track and hold frequency
+
 	void set_ARR(int ARR_value){ //Stop timer to set ARR, avoid timing issues
 		TIM2->CR1 &= ~TIM_CR1_CEN;
 		TIM2->ARR = ARR_value;
@@ -35,6 +42,7 @@ volatile int hold_freq = 1; //Used to track and hold frequency
 		TIM2->EGR = TIM_EGR_UG;
 		TIM2->CR1 |= TIM_CR1_CEN;
 	}
+
 	void set_CCR(void){ //Stop timer to set CCR, avoid timing issues
 			TIM2->CR1 &= ~TIM_CR1_CEN;
 			TIM2->CCR1 = (uint32_t)((((TIM2->ARR + 1) * hold_duty_cycle) / 100) - 1);
@@ -42,6 +50,7 @@ volatile int hold_freq = 1; //Used to track and hold frequency
 			TIM2->EGR = TIM_EGR_UG;
 			TIM2->CR1 |= TIM_CR1_CEN;
 		}
+
 	void set_freq(int freq){ //Set frequency depending on hold freq and hold waveform
 		int ARR = 0;
 		if (hold_waveform == square){ //Check to pull square wave or non-square wave frequencies
@@ -56,6 +65,7 @@ volatile int hold_freq = 1; //Used to track and hold frequency
 				break;
 			case 5: ARR = SqHz500;
 				break;
+
 			}
 		} else {
 			switch(freq){
@@ -72,29 +82,36 @@ volatile int hold_freq = 1; //Used to track and hold frequency
 			}
 		}
 		set_ARR(ARR); //Set ARR to designated value
+
 	}
+
 	void square_wave(){ //Hold wave form until key is pressed
 		wave_index = -1;
 		HAL_Delay(200); //Ensure that duty cycle is not accidently increased by 2
 		while(check_press(0) == -1);
 	}
+
 	void sine_wave(){//Hold wave form until key is pressed
 		wave_index = 0;
 		TIM2->CCR1 = 0;
 		while(check_press(0) == -1);
 	}
+
 	void sawtooth_wave(){//Hold wave form until key is pressed
 		wave_index = 0;
 		TIM2->CCR1 = 0;
 		while(check_press(0) == -1){
 		}
 	}
+
 	void triangle_wave(){//Hold wave form until key is pressed
 		wave_index = 0;
 		TIM2->CCR1 = 0;
 		while(check_press(0) == -1){
+
 		}
 	}
+
 	void generate_sine_table(uint16_t table[TABLE_SIZE]){
 		for (int i = 0; i < TABLE_SIZE; i++){
 			float theta = ((2.0 * M_PI * i) / TABLE_SIZE);
@@ -102,11 +119,13 @@ volatile int hold_freq = 1; //Used to track and hold frequency
 			table[i] = (uint16_t)(1000 * voltage);
 		}
 	}
+
 	void generate_sawtooth_table(uint16_t table[TABLE_SIZE]){
 		for (int i = 0; i < TABLE_SIZE; i++){
 			table[i] = (uint16_t)((3000 * i / TABLE_SIZE));
 		}
 	}
+
 	void generate_triangle_table(uint16_t table[TABLE_SIZE]){
 		for (int i = 0; i < TABLE_SIZE; i++){
 			float edge = (float)i / TABLE_SIZE;
@@ -119,10 +138,12 @@ volatile int hold_freq = 1; //Used to track and hold frequency
 			table[i] = (uint16_t)(3000 * voltage);
 		}
 	}
+
 	void key_logic(int pressed_key){ //Check which key is pressed and change the desired setting while retaining the rest
 		if(pressed_key == -1){ //No key pressed
 			return;
 		}
+
 		else if(pressed_key == 1) {
 			hold_freq = 1;
 		}
@@ -165,51 +186,70 @@ volatile int hold_freq = 1; //Used to track and hold frequency
 		}
 		set_freq(hold_freq); //Set freq, if freq was not changed, this will not affect anything
 		set_CCR(); //Set CCR for square waves
+
 		switch(hold_waveform) {
 			case square:
 				square_wave();
 				break;
+
 			case triangle:
 				triangle_wave();
 				break;
+
 			case sawtooth:
 				sawtooth_wave();
 				break;
+
 			case sine:
 				sine_wave();
 				break;
+
 			default:
 				square_wave();
 				break;
+
 		}
 		return;
+
 	}
+
+
 void SystemClock_Config(void);
+
 int main(void)
 {
- HAL_Init();
- SystemClock_Config();
- RCC->AHB2ENR |= (RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN | RCC_AHB2ENR_GPIOCEN);
- //Generate tables for non-swuare waves
- generate_sine_table(sine_table);
-  generate_sawtooth_table(sawtooth_table);
-  generate_triangle_table(triangle_table);
-  __enable_irq();
-  NVIC->ISER[0] = (1 << (TIM2_IRQn & 0x1F));
-    RCC->APB1ENR1 |= (RCC_APB1ENR1_TIM2EN);	// turn on TIM2
-    TIM2->DIER |= (TIM_DIER_UIE | TIM_DIER_CC1IE);	// enable interrupts on channel 1
-    TIM2->SR &= ~(TIM_SR_CC1IF |TIM_SR_UIF);	//clear interrupt flag
- DAC_init();
- keypad_init();
- set_freq(1);		//set count reload value
- set_CCR();
- TIM2->CR1 |= TIM_CR1_CEN;	//start timer
- while (1)
- {
+
+  HAL_Init();
+
+  SystemClock_Config();
+  RCC->AHB2ENR |= (RCC_AHB2ENR_GPIOAEN | RCC_AHB2ENR_GPIOBEN | RCC_AHB2ENR_GPIOCEN);
+
+  //Generate tables for non-swuare waves
+  generate_sine_table(sine_table);
+   generate_sawtooth_table(sawtooth_table);
+   generate_triangle_table(triangle_table);
+   __enable_irq();
+   NVIC->ISER[0] = (1 << (TIM2_IRQn & 0x1F));
+     RCC->APB1ENR1 |= (RCC_APB1ENR1_TIM2EN);	// turn on TIM2
+     TIM2->DIER |= (TIM_DIER_UIE | TIM_DIER_CC1IE);	// enable interrupts on channel 1
+     TIM2->SR &= ~(TIM_SR_CC1IF |TIM_SR_UIF);	//clear interrupt flag
+
+  DAC_init();
+  keypad_init();
+
+  set_freq(1);		//set count reload value
+  set_CCR();
+  TIM2->CR1 |= TIM_CR1_CEN;	//start timer
+
+
+  while (1)
+  {
 	int pressed_key = check_press(0);
 	key_logic(pressed_key);
- }
+
+  }
 }
+
 void TIM2_IRQHandler(void) {
 	// Handle ARR first to skip over CCR when not SQ wave
 	if(TIM2->SR & TIM_SR_UIF) {
@@ -244,3 +284,83 @@ else if(TIM2->SR & TIM_SR_CC1IF) {
 		TIM2->SR &= ~(TIM_SR_CC1IF);
 	}
 }
+
+/**
+  * @brief System Clock Configuration
+  * @retval None
+  */
+void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
+  /** Configure the main internal regulator output voltage
+  */
+  if (HAL_PWREx_ControlVoltageScaling(PWR_REGULATOR_VOLTAGE_SCALE1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_MSI;
+  RCC_OscInitStruct.MSIState = RCC_MSI_ON;
+  RCC_OscInitStruct.MSICalibrationValue = 0;
+  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_10;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/* USER CODE BEGIN 4 */
+
+/* USER CODE END 4 */
+
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
+  __disable_irq();
+  while (1)
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */
+}
+
+#ifdef  USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
+void assert_failed(uint8_t *file, uint32_t line)
+{
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
+}
+#endif /* USE_FULL_ASSERT */
